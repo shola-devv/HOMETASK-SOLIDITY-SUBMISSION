@@ -61,8 +61,9 @@ contract EthexLoto is Ownable {
     uint256 internal constant MIN_BET = 0.01 ether;
     uint256 internal constant PRECISION = 1 ether;
     uint256 internal constant JACKPOT_PERCENT = 10;
-    uint256 internal constant HOUSE_EDGE = 10;
     
+
+
     constructor(address payable jackpot, address payable house, address payable superprize) public payable {
         jackpotAddress = jackpot;
         houseAddress = house;
@@ -71,6 +72,15 @@ contract EthexLoto is Ownable {
     
     function payIn() external payable { }
     
+    function getHousePercent(uint8 markedCount) internal pure returns (uint256) {
+        if (markedCount == 1)
+            return 12;
+        if (markedCount <= 3)
+            return 10;
+        return 8;
+    }
+
+
     function placeBet(bytes22 params) external payable {
         require(tx.origin == msg.sender);
         require(msg.value >= MIN_BET, "Bet amount should be greater or equal than minimal amount");
@@ -82,16 +92,29 @@ contract EthexLoto is Ownable {
         uint256 coefficient;
         uint8 markedCount;
         uint256 holdAmount;
+
         uint256 jackpotFee = msg.value * JACKPOT_PERCENT * PRECISION / 100 / PRECISION;
-        uint256 houseEdgeFee = msg.value * HOUSE_EDGE * PRECISION / 100 / PRECISION;
+
+        // First get markedCount ( msg.value used temporarily, holdAmount will be recalculated)
+        (, markedCount, ) = getHold(msg.value, bet);
+
+        //  Reject invalid bets
+        require(markedCount > 0, "No marked cells");
+
+        // Compute dynamic house edge
+        uint256 housePercent = getHousePercent(markedCount);
+        uint256 houseEdgeFee = msg.value * housePercent * PRECISION / 100 / PRECISION;
+
+        // Now compute correct bet amount
         uint256 betAmount = msg.value - jackpotFee - houseEdgeFee;
-        
-        (coefficient, markedCount, holdAmount) = getHold(betAmount, bet);
-        
-        require(msg.value * (100 - JACKPOT_PERCENT - HOUSE_EDGE) * (coefficient * 8 - 15 * markedCount) <= 9000 ether * markedCount);
+
+        // Recalculate holdAmount with correct betAmount
+        (coefficient, , holdAmount) = getHold(betAmount, bet);
+       
+        require(msg.value * (100 - JACKPOT_PERCENT - housePercent) * (coefficient * 8 - 15 * markedCount) <= 9000 ether * markedCount);
         
         require(
-            msg.value * (800 * coefficient - (JACKPOT_PERCENT + HOUSE_EDGE) * (coefficient * 8 + 15 * markedCount)) <= 1500 * markedCount * (address(this).balance - holdBalance));
+            msg.value * (800 * coefficient - (JACKPOT_PERCENT + housePercent) * (coefficient * 8 + 15 * markedCount)) <= 1500 * markedCount * (address(this).balance - holdBalance));
         
         holdBalance += holdAmount;
         
